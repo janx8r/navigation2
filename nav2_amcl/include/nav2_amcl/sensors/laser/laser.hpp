@@ -22,6 +22,7 @@
 #include "nav2_amcl/pf/pf.hpp"
 #include "nav2_amcl/pf/pf_pdf.hpp"
 #include "nav2_amcl/map/map.hpp"
+#include "nav2_ndt_map/ndt_map_2d.hpp"
 
 namespace nav2_amcl
 {
@@ -42,6 +43,13 @@ public:
    * @param map Map pointer to use
    */
   Laser(size_t max_beams, map_t * map);
+
+  /**
+   * @brief A Laser constructor
+   * @param max_beams number of beams to use
+   * @param ndt_map NDT-Map pointer to use
+   */
+  Laser(size_t max_beams, NdtMap * map);
 
   /*
    * @brief Laser destructor
@@ -74,6 +82,7 @@ protected:
    */
   void reallocTempData(int max_samples, int max_obs);
   map_t * map_;
+  NdtMap * ndt_map_;
   pf_vector_t laser_pose_;
   int max_beams_;
   int max_samples_;
@@ -203,6 +212,37 @@ private:
   double beam_skip_distance_;
   double beam_skip_threshold_;
   double beam_skip_error_threshold_;
+};
+
+/*
+ * @class NdtLaserModel
+ * @brief NDT model laser sensor
+ */
+class NdtLaserModel : public Laser
+{
+public:
+  /*
+   * @brief NdtLaserModel constructor
+   */
+  NdtLaserModel(
+    size_t max_beams, NdtMap * map);
+
+  /*
+   * @brief Run a sensor update on laser
+   * @param pf Particle filter to use
+   * @param data Laser data to use
+   * @return if it was succesful
+   */
+  bool sensorUpdate(pf_t * pf, LaserData * data);
+
+private:
+  /*
+   * @brief Perform the update function
+   * @param data Laser data to use
+   * @param pf Particle filter to use
+   * @return if it was succesful
+   */
+  static double sensorFunction(LaserData * data, pf_sample_set_t * set);
 };
 
 }  // namespace nav2_amcl

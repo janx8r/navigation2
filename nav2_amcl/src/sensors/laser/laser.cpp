@@ -36,6 +36,13 @@ Laser::Laser(size_t max_beams, map_t * map)
   map_ = map;
 }
 
+Laser::Laser(size_t max_beams, NdtMap * map)
+: max_samples_(0), max_obs_(0), temp_obs_(NULL)
+{
+  max_beams_ = max_beams;
+  ndt_map_ = map;
+}
+
 Laser::~Laser()
 {
   if (temp_obs_) {

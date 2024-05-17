@@ -20,6 +20,8 @@
 
 /* Author: Brian Gerkey */
 
+#include "rclcpp/rclcpp.hpp"
+
 #include "nav2_amcl/amcl_node.hpp"
 
 #include <algorithm>
@@ -115,7 +117,7 @@ AmclNode::AmclNode()
 
   add_parameter(
     "laser_model_type", rclcpp::ParameterValue(std::string("likelihood_field")),
-    "Which model to use, either beam, likelihood_field, or likelihood_field_prob",
+    "Which model to use, either beam, likelihood_field, likelihood_field_prob or ndt_laser",
     "Same as likelihood_field but incorporates the beamskip feature, if enabled");
 
   add_parameter(
@@ -219,8 +221,26 @@ AmclNode::AmclNode()
     "Topic to subscribe to in order to receive the laser scan for localization");
 
   add_parameter(
+    "particle_cloud_topic", rclcpp::ParameterValue("particle_cloud"),
+    "Topic to publish the particle cloud to");
+
+  add_parameter(
     "map_topic", rclcpp::ParameterValue("map"),
     "Topic to subscribe to in order to receive the map to localize on");
+
+  add_parameter(
+    "ndt_map_topic", rclcpp::ParameterValue("ndt_map"),
+    "Topic to subscribe to in order to receive the ndt-map to localize on");
+
+  add_parameter(
+    "amcl_pose_topic", rclcpp::ParameterValue("amcl_pose"),
+    "Topic to publish the amcl_pose to");
+
+  add_parameter(
+    "initialpose_topic", rclcpp::ParameterValue("initialpose"),
+    "Topic to set the initial pose of the robot");
+
+  ndt_map_ = new NdtMap(global_frame_id_, this->get_node_clock_interface());
 }
 
 AmclNode::~AmclNode()
@@ -232,6 +252,9 @@ AmclNode::on_configure(const rclcpp_lifecycle::State & /*state*/)
 {
   RCLCPP_INFO(get_logger(), "Configuring");
 
+  //ndt_map_ = new NdtMap(global_frame_id_, this->get_node_clock_interface());
+
+
   initParameters();
   initTransforms();
   initParticleFilter();
@@ -240,6 +263,15 @@ AmclNode::on_configure(const rclcpp_lifecycle::State & /*state*/)
   initPubSub();
   initServices();
   initOdometry();
+
+  // if(ndt_map_->load_from_file("map_komplett_30.ndt")){
+  //   nav2_msgs::msg::NDTMapMsg map_ndt_msg;
+  //   rclcpp::Publisher<nav2_msgs::msg::NDTMapMsg>::SharedPtr ndt_map_pub;
+  //   ndt_map_pub = this->create_publisher<nav2_msgs::msg::NDTMapMsg>("ndt_map", rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable());
+  //   ndt_map_->to_message(&map_ndt_msg);
+  //   ndt_map_pub->publish(map_ndt_msg);
+  //   ndtMapReceived(std::make_shared<nav2_msgs::msg::NDTMapMsg>(map_ndt_msg));
+  // }
 
   return nav2_util::CallbackReturn::SUCCESS;
 }
@@ -339,6 +371,9 @@ AmclNode::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
     map_free(map_);
     map_ = nullptr;
   }
+  // if (ndt_map_) {
+  //   delete ndt_map_;
+  // }
   first_map_received_ = false;
   free_space_indices.resize(0);
 
@@ -565,6 +600,8 @@ AmclNode::initialPoseReceived(geometry_msgs::msg::PoseWithCovarianceStamped::Sha
 void
 AmclNode::handleInitialPose(geometry_msgs::msg::PoseWithCovarianceStamped & msg)
 {
+
+  RCLCPP_WARN_STREAM(get_logger(), "handleInitialPose, msg.header.frame_id = " << msg.header.frame_id);
   // In case the client sent us a pose estimate in the past, integrate the
   // intervening odometric change.
   geometry_msgs::msg::TransformStamped tx_odom;
@@ -650,6 +687,8 @@ AmclNode::laserReceived(sensor_msgs::msg::LaserScan::ConstSharedPtr laser_scan)
   // Do we have the base->base_laser Tx yet?
   if (frame_to_laser_.find(laser_scan_frame_id) == frame_to_laser_.end()) {
     if (!addNewScanner(laser_index, laser_scan, laser_scan_frame_id, laser_pose)) {
+      RCLCPP_WARN(get_logger(), "no base->base_laser Tx...");
+      last_time_printed_msg_ = now();
       return;  // could not find transform
     }
   } else {
@@ -1031,7 +1070,7 @@ AmclNode::sendMapToOdomTransform(const tf2::TimePoint & transform_expiration)
 nav2_amcl::Laser *
 AmclNode::createLaserObject()
 {
-  RCLCPP_INFO(get_logger(), "createLaserObject");
+  RCLCPP_INFO_STREAM(get_logger(), "createLaserObject: " << sensor_model_type_);
 
   if (sensor_model_type_ == "beam") {
     return new nav2_amcl::BeamModel(
@@ -1044,6 +1083,10 @@ AmclNode::createLaserObject()
       z_hit_, z_rand_, sigma_hit_,
       laser_likelihood_max_dist_, do_beamskip_, beam_skip_distance_, beam_skip_threshold_,
       beam_skip_error_threshold_, max_beams_, map_);
+  }
+
+  if (sensor_model_type_ == "ndt_laser") {
+    return new nav2_amcl::NdtLaserModel(max_beams_, ndt_map_);
   }
 
   return new nav2_amcl::LikelihoodFieldModel(
@@ -1101,7 +1144,12 @@ AmclNode::initParameters()
   get_parameter("first_map_only_", first_map_only_);
   get_parameter("always_reset_initial_pose", always_reset_initial_pose_);
   get_parameter("scan_topic", scan_topic_);
+  get_parameter("particle_cloud_topic", particle_cloud_topic_);
   get_parameter("map_topic", map_topic_);
+  get_parameter("ndt_map_topic", ndt_map_topic_);
+  get_parameter("amcl_pose_topic", amcl_pose_topic_);
+  get_parameter("initialpose_topic", initialpose_topic_);
+  
 
   save_pose_period_ = tf2::durationFromSec(1.0 / save_pose_rate);
   transform_tolerance_ = tf2::durationFromSec(tmp_tol);
@@ -1155,12 +1203,16 @@ AmclNode::initParameters()
 void
 AmclNode::mapReceived(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
-  RCLCPP_DEBUG(get_logger(), "AmclNode: A new map was received.");
-  if (first_map_only_ && first_map_received_) {
-    return;
+  if(sensor_model_type_ != "ndt_laser"){
+    RCLCPP_DEBUG(get_logger(), "AmclNode: A new map was received.");
+    if (first_map_only_ && first_map_received_) {
+      return;
+    }
+    handleMapMessage(*msg);
+    first_map_received_ = true;
   }
-  handleMapMessage(*msg);
-  first_map_received_ = true;
+  else
+    return;
 }
 
 void
@@ -1187,6 +1239,7 @@ AmclNode::handleMapMessage(const nav_msgs::msg::OccupancyGrid & msg)
   createFreeSpaceVector();
 #endif
 }
+
 
 void
 AmclNode::createFreeSpaceVector()
@@ -1216,6 +1269,7 @@ AmclNode::freeMapDependentMemory()
   lasers_update_.clear();
   frame_to_laser_.clear();
 }
+
 
 // Convert an OccupancyGrid map message into the internal representation. This function
 // allocates a map_t and returns it.
@@ -1248,6 +1302,47 @@ AmclNode::convertMap(const nav_msgs::msg::OccupancyGrid & map_msg)
 }
 
 void
+AmclNode::ndtMapReceived(const nav2_msgs::msg::NDTMapMsg::SharedPtr msg)
+{
+  if(sensor_model_type_ == "ndt_laser"){
+    RCLCPP_DEBUG(get_logger(), "AmclNode: A new ndt_map was received.");
+    if (first_map_only_ && first_map_received_) {
+      return;
+    }
+    handleNdtMapMessage(*msg);
+    first_map_received_ = true;
+  }
+  else
+    return;
+}
+
+void
+AmclNode::handleNdtMapMessage(const nav2_msgs::msg::NDTMapMsg & msg)
+{
+  std::lock_guard<std::recursive_mutex> cfl(configuration_mutex_);
+
+  RCLCPP_INFO(
+    get_logger(), "Received a %.2fm by %.2fm by %.2fm ndt-map @ %.2f/%.2f/%.2f m/cell",
+    msg.x_size,
+    msg.y_size,
+    msg.z_size,
+    msg.x_cell_size,
+    msg.y_cell_size,
+    msg.z_cell_size);
+  if (msg.header.frame_id != global_frame_id_) {
+    RCLCPP_WARN(
+      get_logger(), "Frame_id of map received:'%s' doesn't match global_frame_id:'%s'. This could"
+      " cause issues with reading published topics",
+      msg.header.frame_id.c_str(),
+      global_frame_id_.c_str());
+  }
+  //delete ndt_map_;
+  //ndt_map_ = new NdtMap(global_frame_id_, this->get_node_clock_interface());
+  ndt_map_->from_message(msg);
+}
+
+
+void
 AmclNode::initTransforms()
 {
   RCLCPP_INFO(get_logger(), "initTransforms");
@@ -1269,16 +1364,24 @@ AmclNode::initTransforms()
 void
 AmclNode::initMessageFilters()
 {
+
+  // laser_scan_sub_simple = this->create_subscription<sensor_msgs::msg::LaserScan>(
+  //   scan_topic_, 10, std::bind(&AmclNode::laserReceived, this, std::placeholders::_1));
+
   laser_scan_sub_ = std::make_unique<message_filters::Subscriber<sensor_msgs::msg::LaserScan>>(
     rclcpp_node_.get(), scan_topic_, rmw_qos_profile_sensor_data);
 
+
+  
   laser_scan_filter_ = std::make_unique<tf2_ros::MessageFilter<sensor_msgs::msg::LaserScan>>(
-    *laser_scan_sub_, *tf_buffer_, odom_frame_id_, 10, rclcpp_node_, transform_tolerance_);
+    *laser_scan_sub_, *tf_buffer_, odom_frame_id_, 100, rclcpp_node_, transform_tolerance_);
 
   laser_scan_connection_ = laser_scan_filter_->registerCallback(
     std::bind(
       &AmclNode::laserReceived,
       this, std::placeholders::_1));
+
+  RCLCPP_INFO_STREAM(get_logger(), "initMessageFilters, odom_frame_id_ = " << odom_frame_id_ << ", scan_topic_ = " << scan_topic_);
 }
 
 void
@@ -1287,20 +1390,24 @@ AmclNode::initPubSub()
   RCLCPP_INFO(get_logger(), "initPubSub");
 
   particle_cloud_pub_ = create_publisher<nav2_msgs::msg::ParticleCloud>(
-    "particle_cloud",
+    particle_cloud_topic_,
     rclcpp::SensorDataQoS());
 
   pose_pub_ = create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
-    "amcl_pose",
+    amcl_pose_topic_,
     rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable());
 
   initial_pose_sub_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
-    "initialpose", rclcpp::SystemDefaultsQoS(),
+    initialpose_topic_, rclcpp::SystemDefaultsQoS(),
     std::bind(&AmclNode::initialPoseReceived, this, std::placeholders::_1));
 
   map_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
     map_topic_, rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable(),
     std::bind(&AmclNode::mapReceived, this, std::placeholders::_1));
+
+  ndt_map_sub_ = create_subscription<nav2_msgs::msg::NDTMapMsg>(
+    ndt_map_topic_, rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable(),
+    std::bind(&AmclNode::ndtMapReceived, this, std::placeholders::_1));
 
   RCLCPP_INFO(get_logger(), "Subscribed to map topic.");
 }

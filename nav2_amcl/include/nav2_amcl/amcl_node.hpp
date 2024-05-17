@@ -40,6 +40,8 @@
 #include "std_srvs/srv/empty.hpp"
 #include "tf2_ros/transform_broadcaster.h"
 #include "tf2_ros/transform_listener.h"
+#include "nav2_msgs/msg/ndt_map_msg.hpp"
+#include "nav2_ndt_map/ndt_map_2d.hpp"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -106,21 +108,37 @@ protected:
    * @brief Get new map from ROS topic to localize in
    * @param msg Map message
    */
-  void mapReceived(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
-  /*
+  void mapReceived(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);  /*
    * @brief Handle a new map message
    * @param msg Map message
    */
   void handleMapMessage(const nav_msgs::msg::OccupancyGrid & msg);
   /*
-   * @brief Creates lookup table of free cells in map
-   */
-  void createFreeSpaceVector();
-  /*
    * @brief Frees allocated map related memory
    */
   void freeMapDependentMemory();
   map_t * map_{nullptr};
+  /*
+   * @brief Creates lookup table of free cells in map
+   */
+  void createFreeSpaceVector();
+
+  // NDT-Map-related
+  /*
+   * @brief Get new map from ROS topic to localize in
+   * @param msg Map message
+   */
+  void ndtMapReceived(const nav2_msgs::msg::NDTMapMsg::SharedPtr msg);
+  /*
+   * @brief Handle a new map message
+   * @param msg Map message
+   */
+  void handleNdtMapMessage(const nav2_msgs::msg::NDTMapMsg & msg);
+
+  NdtMap * ndt_map_;
+
+
+
   /*
    * @brief Convert an occupancy grid map to an AMCL map
    * @param map_msg Map message
@@ -132,6 +150,7 @@ protected:
   amcl_hyp_t * initial_pose_hyp_;
   std::recursive_mutex configuration_mutex_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::ConstSharedPtr map_sub_;
+  rclcpp::Subscription<nav2_msgs::msg::NDTMapMsg>::ConstSharedPtr ndt_map_sub_;
 #if NEW_UNIFORM_SAMPLING
   static std::vector<std::pair<int, int>> free_space_indices;
 #endif
@@ -158,6 +177,7 @@ protected:
    */
   void initMessageFilters();
   std::unique_ptr<message_filters::Subscriber<sensor_msgs::msg::LaserScan>> laser_scan_sub_;
+  // rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr laser_scan_sub_simple;
   std::unique_ptr<tf2_ros::MessageFilter<sensor_msgs::msg::LaserScan>> laser_scan_filter_;
   message_filters::Connection laser_scan_connection_;
 
@@ -172,6 +192,8 @@ protected:
     pose_pub_;
   rclcpp_lifecycle::LifecyclePublisher<nav2_msgs::msg::ParticleCloud>::SharedPtr
     particle_cloud_pub_;
+
+
   /*
    * @brief Handle with an initial pose estimate is received
    */
@@ -367,7 +389,11 @@ protected:
   double z_short_;
   double z_rand_;
   std::string scan_topic_{"scan"};
+  std::string particle_cloud_topic_{"particle_cloud"};
   std::string map_topic_{"map"};
+  std::string ndt_map_topic_{"ndt_map"};
+  std::string amcl_pose_topic_{"amcl_pose"};
+  std::string initialpose_topic_{"initialpose"};
 };
 
 }  // namespace nav2_amcl

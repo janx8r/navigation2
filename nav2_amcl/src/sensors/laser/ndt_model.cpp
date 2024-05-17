@@ -27,36 +27,32 @@
 namespace nav2_amcl
 {
 
-LikelihoodFieldModel::LikelihoodFieldModel(
-  double z_hit, double z_rand, double sigma_hit,
-  double max_occ_dist, size_t max_beams, map_t * map)
+NdtLaserModel::NdtLaserModel(size_t max_beams, NdtMap * map)
 : Laser(max_beams, map)
 {
-  z_hit_ = z_hit;
-  z_rand_ = z_rand;
-  sigma_hit_ = sigma_hit;
-  map_update_cspace(map, max_occ_dist);
 }
 
 double
-LikelihoodFieldModel::sensorFunction(LaserData * data, pf_sample_set_t * set)
+NdtLaserModel::sensorFunction(LaserData * data, pf_sample_set_t * set)
 {
-  LikelihoodFieldModel * self;
-  int i, j, step;
-  double z, pz;
-  double p;
+  NdtLaserModel * self;
+  int step;
+  double p, pz;
   double obs_range, obs_bearing;
   double total_weight;
   pf_sample_t * sample;
   pf_vector_t pose;
-  pf_vector_t hit;
 
-  self = reinterpret_cast<LikelihoodFieldModel *>(data->laser);
+  self = reinterpret_cast<NdtLaserModel *>(data->laser);
 
   total_weight = 0.0;
 
+  // std::cout << "start computing total_weight. set->sample_count = " << set->sample_count << ", data->range_count = " << data->range_count << std::endl;
+
+
+
   // Compute the sample weights
-  for (j = 0; j < set->sample_count; j++) {
+  for (int j = 0; j < set->sample_count; j++) {
     sample = set->samples + j;
     pose = sample->pose;
 
@@ -65,10 +61,6 @@ LikelihoodFieldModel::sensorFunction(LaserData * data, pf_sample_set_t * set)
 
     p = 1.0;
 
-    // Pre-compute a couple of things
-    double z_hit_denom = 2 * self->sigma_hit_ * self->sigma_hit_;
-    double z_rand_mult = 1.0 / data->range_max;
-
     step = (data->range_count - 1) / (self->max_beams_ - 1);
 
     // Step size must be at least 1
@@ -76,7 +68,7 @@ LikelihoodFieldModel::sensorFunction(LaserData * data, pf_sample_set_t * set)
       step = 1;
     }
 
-    for (i = 0; i < data->range_count; i += step) {
+    for (int i = 0; i < data->range_count; i += step) {
       obs_range = data->ranges[i][0];
       obs_bearing = data->ranges[i][1];
 
@@ -90,38 +82,16 @@ LikelihoodFieldModel::sensorFunction(LaserData * data, pf_sample_set_t * set)
         continue;
       }
 
-      pz = 0.0;
-
       // Compute the endpoint of the beam
-      hit.v[0] = pose.v[0] + obs_range * cos(pose.v[2] + obs_bearing);
-      hit.v[1] = pose.v[1] + obs_range * sin(pose.v[2] + obs_bearing);
+      double pos_x = pose.v[0] + obs_range * cos(pose.v[2] + obs_bearing);
+      double pos_y = pose.v[1] + obs_range * sin(pose.v[2] + obs_bearing);
 
-      // Convert to map grid coords.
-      int mi, mj;
-      mi = MAP_GXWX(self->map_, hit.v[0]);
-      mj = MAP_GYWY(self->map_, hit.v[1]);
-
-      // Part 1: Get distance from the hit to closest obstacle.
-      // Off-map penalized as max distance
-      if (!MAP_VALID(self->map_, mi, mj)) {
-        z = self->map_->max_occ_dist;
-      } else {
-        z = self->map_->cells[MAP_INDEX(self->map_, mi, mj)].occ_dist;
-      }
-      // Gaussian model
-      // NOTE: this should have a normalization of 1/(sqrt(2pi)*sigma)
-      pz += self->z_hit_ * exp(-(z * z) / z_hit_denom);
-      // Part 2: random measurements
-      pz += self->z_rand_ * z_rand_mult;
-
-      // TODO(?): outlier rejection for short readings
-
-      assert(pz <= 1.0);
-      assert(pz >= 0.0);
-      //      p *= pz;
-      // here we have an ad-hoc weighting scheme for combining beam probs
-      // works well, though...
-      p += pz * pz * pz;
+      pz = self->ndt_map_->get_probability(pos_x, pos_y);
+      
+      if(pz != pz)
+        std::cout << "pz is nan, i = " << i << " j = " << j << std::endl;
+      else
+        p += pz;
     }
 
     sample->weight *= p;
@@ -129,12 +99,13 @@ LikelihoodFieldModel::sensorFunction(LaserData * data, pf_sample_set_t * set)
   }
 
   std::cout << "total_weight = " << total_weight << std::endl;
+
   return total_weight;
 }
 
 
 bool
-LikelihoodFieldModel::sensorUpdate(pf_t * pf, LaserData * data)
+NdtLaserModel::sensorUpdate(pf_t * pf, LaserData * data)
 {
   if (max_beams_ < 2) {
     return false;

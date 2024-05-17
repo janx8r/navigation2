@@ -15,12 +15,17 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(nav2_util REQUIRED)
 find_package(nav2_msgs REQUIRED)
+find_package(eigen3_cmake_module REQUIRED)
+find_package(Eigen3 REQUIRED)
+find_package(nav2_ndt_map REQUIRED)
 
 nav2_package()
 
 include_directories(
   include
 )
+
+include_directories(${EIGEN3_INCLUDE_DIRS})
 
 include(CheckSymbolExists)
 check_symbol_exists(drand48 stdlib.h HAVE_DRAND48)
@@ -60,6 +65,8 @@ set(dependencies
   tf2
   nav2_util
   nav2_msgs
+  eigen3_cmake_module
+  nav2_ndt_map
 )
 
 ament_target_dependencies(${executable_name}
@@ -68,6 +75,7 @@ ament_target_dependencies(${executable_name}
 
 target_link_libraries(${executable_name}
   ${library_name}
+  nav2_ndt_map::ndt_map_2d_lib
 )
 
 ament_target_dependencies(${library_name}

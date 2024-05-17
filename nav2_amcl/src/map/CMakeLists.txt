@@ -5,6 +5,10 @@ add_library(map_lib SHARED
   map_cspace.cpp
 )
 
+ament_target_dependencies(map_lib
+  nav2_ndt_map
+)
+
 install(TARGETS
   map_lib
   ARCHIVE DESTINATION lib

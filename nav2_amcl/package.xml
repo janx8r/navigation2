@@ -35,6 +35,9 @@
   <depend>nav2_msgs</depend>
   <depend>launch_ros</depend>
   <depend>launch_testing</depend>
+  <depend>eigen3_cmake_module</depend>
+  <depend>eigen</depend>
+  <depend>nav2_ndt_map</depend>
 
   <test_depend>ament_lint_common</test_depend>
   <test_depend>ament_lint_auto</test_depend>
