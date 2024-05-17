@@ -18,4 +18,14 @@
     <description>The Particle Cloud rviz display.</description>
   </class>
 
+
+  <class name="nav2_rviz_plugins/NDT"
+         type="nav2_rviz_plugins::NDTDisplay"
+         base_class_type="rviz_common::Display">
+    <description>
+      Displays elipsoids representing ndt map.
+    </description>
+    <message_type>nav2_msgs/msg/NDTMapMsg</message_type>
+  </class>
+
 </library>

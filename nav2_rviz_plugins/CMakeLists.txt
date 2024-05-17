@@ -31,6 +31,9 @@ find_package(rviz_rendering REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(eigen3_cmake_module REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 set(nav2_rviz_plugins_headers_to_moc
   include/nav2_rviz_plugins/goal_pose_updater
@@ -39,11 +42,16 @@ set(nav2_rviz_plugins_headers_to_moc
   include/nav2_rviz_plugins/nav2_panel.hpp
   include/nav2_rviz_plugins/particle_cloud_display/flat_weighted_arrows_array.hpp
   include/nav2_rviz_plugins/particle_cloud_display/particle_cloud_display.hpp
+  include/nav2_rviz_plugins/ndt_display.hpp
+  include/nav2_rviz_plugins/ndt_visual.hpp
 )
 
 include_directories(
   include
 )
+include_directories(${EIGEN3_INCLUDE_DIRS})
+
+
 
 set(library_name ${PROJECT_NAME})
 
@@ -52,8 +60,11 @@ add_library(${library_name} SHARED
   src/nav2_panel.cpp
   src/particle_cloud_display/flat_weighted_arrows_array.cpp
   src/particle_cloud_display/particle_cloud_display.cpp
+  src/ndt_display.cpp
+  src/ndt_visual.cpp
   ${nav2_rviz_plugins_headers_to_moc}
 )
+
 
 set(dependencies
   geometry_msgs
